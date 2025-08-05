@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+    volumes:
+      - ./src:/app/src
+      - ./agents:/app/agents
+    command: npm run dev
