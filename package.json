@@ -58,3 +58,8 @@
     "start": "node --optimize-for-size --gc-interval=100 index.js"
   }
 }
+{
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.19.3"
+  }
+}
