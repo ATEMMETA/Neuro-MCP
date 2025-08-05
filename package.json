@@ -53,3 +53,8 @@
     }
   }
 }
+{
+  "scripts": {
+    "start": "node --optimize-for-size --gc-interval=100 index.js"
+  }
+}
