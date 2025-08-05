@@ -205,6 +205,8 @@ bot.on('message', async (ctx) => {
   } else {
     console.log(`[Telegram Bot] Received non-text message, ignoring.`);
   }
+
+
 });
 
 bot.start((ctx) => ctx.reply('Welcome to AI Swarm Gateway! Send me a message.'));
@@ -213,6 +215,8 @@ bot.start((ctx) => ctx.reply('Welcome to AI Swarm Gateway! Send me a message.'))
 // --- Express HTTP Server for Telegram Webhook ---
 const app = express();
 app.use(express.json());
+
+
 
 const httpPort = parseInt(process.env.PORT || '3000');
 const WEBHOOK_PATH = `/telegram-webhook`;
@@ -230,6 +234,14 @@ app.listen(httpPort, () => {
   const webhookUrl = `${publicRenderUrl}${WEBHOOK_PATH}`;
 
   bot.telegram.setWebhook(webhookUrl)
+
+    import { Logger } from 'pino';
+
+const logger = Logger();
+app.use((req, res, next) => {
+  logger.info({ url: req.url, method: req.method }, 'Request received');
+  next();
+});
     .then(() => console.log(`[Telegram] Webhook set to ${webhookUrl}`))
     .catch(e => console.error("[Telegram] Error setting webhook:", e));
 });
