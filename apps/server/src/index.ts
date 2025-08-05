@@ -117,6 +117,29 @@ app.listen(port, () => {
 process.on('SIGTERM', () => {
   logger.info('Received SIGTERM. Shutting down gracefully...');
   process.exit(0);
+
+  // apps/server/src/index.ts (updated)
+// ... all your existing imports ...
+import { authenticate } from './middleware/authMiddleware';
+
+const app = express();
+const port = Number(process.env.PORT) || 3000;
+
+// Unified Middleware Stack
+app.use(cors());
+app.use(express.json());
+app.use(attachRequestId);
+app.use(pinoHttp({ logger }));
+
+// Authentication middleware applied to all agent routes
+app.use('/agents', authenticate); // <-- IMPORTANT: Add this line
+
+// Health and readiness endpoints (unauthenticated)
+app.use('/health', healthController);
+
+// ... rest of your routes remain the same ...
+
+  
 });
 // apps/server/src/index.ts (refined logger config)
 import pino from 'pino';
