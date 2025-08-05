@@ -145,3 +145,29 @@ const logger = LOKI_URL && LOKI_USERNAME && LOKI_PASSWORD ? pino({
   }
 }) : baseLogger;
 
+// apps/server/src/index.ts (refined)
+import rateLimit from 'express-rate-limit';
+// ... other imports ...
+
+// Global API Rate Limiter (100 requests per 15 minutes)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Max requests per IP
+  message: 'Too many requests, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Stricter limiter for high-value endpoints
+const agentLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 20, // Max requests per IP
+  message: 'Too many agent requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ... in your main() function ...
+app.use(apiLimiter); // Apply to all routes by default
+app.use('/agents', agentLimiter); // Apply a stricter limit to the agents route
+
