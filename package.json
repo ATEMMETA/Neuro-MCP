@@ -42,3 +42,14 @@
     "lint": "eslint src/**/*.{ts,tsx} --fix"
   }
 }
+{
+  "lint-staged": {
+    "src/**/*.{ts,tsx,json,md}": ["prettier --write", "eslint --fix"]
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "pre-push": "npm run validate"
+    }
+  }
+}
