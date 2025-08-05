@@ -251,3 +251,12 @@ process.once('SIGINT', () => { bot.stop('SIGINT'); console.log('Shutting down...
 process.once('SIGTERM', () => { bot.stop('SIGTERM'); console.log('Shutting down...'); });
 
 console.log(`[Server] AI Swarm Gateway started. TCP port: ${tcpPort}, HTTP port: ${httpPort}.`);
+
+
+import { Logger } from 'pino';
+
+const logger = Logger();
+app.use((req, res, next) => {
+  logger.info({ url: req.url, method: req.method }, 'Request received');
+  next();
+});
