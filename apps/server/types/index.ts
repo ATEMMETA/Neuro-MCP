@@ -16,3 +16,8 @@ export interface GithubAgentResponse {
 
 export type AgentTask = ClaudeAgentTask | TmuxAgentTask | GithubAgentTask;
 export type AgentResponse = ClaudeAgentResponse | TmuxAgentResponse | GithubAgentResponse;
+// ... in main() function ...
+const agentManager = new AgentManager();
+agentManager.registerAgentHandler('claude-agent', claudeAgent);
+agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
+agentManager.registerAgentHandler('github-agent', githubAgent); // <-- New agent!
