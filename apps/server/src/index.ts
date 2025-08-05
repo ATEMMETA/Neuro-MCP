@@ -194,3 +194,63 @@ const agentLimiter = rateLimit({
 app.use(apiLimiter); // Apply to all routes by default
 app.use('/agents', agentLimiter); // Apply a stricter limit to the agents route
 
+// apps/server/src/index.ts
+import express from 'express';
+import cors from 'cors';
+import pinoHttp from 'pino-http';
+import { AgentManager } from './services/AgentManager';
+import { claudeAgent } from './agents/claudeAgent';
+import { tmuxAgent } from './agents/tmuxAgent';
+import { attachRequestId, logger } from './middleware/requestId.middleware';
+import healthController from './controllers/healthController';
+import errorHandler from './middleware/errorHandler';
+
+// Main Express app setup
+const app = express();
+const port = Number(process.env.PORT) || 3000;
+
+// Unified Middleware Stack
+app.use(cors());
+app.use(express.json());
+app.use(attachRequestId);
+app.use(pinoHttp({ logger }));
+
+// Health and readiness endpoints for monitoring
+app.use('/health', healthController);
+
+// Agent Manager Setup & Handler Registration
+const agentManager = new AgentManager();
+agentManager.registerAgentHandler('claude-agent', claudeAgent);
+agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
+
+// API Routes for Agent Interaction
+app.get('/agents', (_req, res) => {
+  res.json(agentManager.listAgents());
+});
+
+app.post('/agents/:name/run', async (req, res) => {
+  const agentName = req.params.name;
+  try {
+    const result = await agentManager.runAgent(agentName, req.body);
+    res.json({ success: true, result });
+  } catch (e: any) {
+    logger.error({ err: e, agent: agentName, reqId: req.id }, 'Agent execution failed');
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Final error handler middleware (must be last)
+app.use(errorHandler);
+
+// Start the server
+app.listen(port, () => {
+  logger.info(`🚀 MCP Server running at http://localhost:${port}`);
+});
+
+// Graceful shutdown on SIGTERM (for Docker, Render, etc.)
+process.on('SIGTERM', () => {
+  logger.info('Received SIGTERM. Shutting down gracefully...');
+  process.exit(0);
+});
+
+
