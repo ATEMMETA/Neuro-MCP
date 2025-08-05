@@ -38,3 +38,103 @@ paths:
                 properties:
                   result:
                     type: string
+
+
+
+# openapi.yaml
+openapi: 3.0.0
+info:
+  title: MCP Server API
+  description: API for the Meta-AI Control Plane server. Manages sessions and executes AI tasks.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+paths:
+  /session:
+    post:
+      summary: Create a new AI session
+      description: Creates a new tmux session to run AI tasks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Invalid request
+  /task:
+    post:
+      summary: Run an AI task in a session
+      description: Executes a single AI task with a prompt within a specified session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunTaskRequest'
+      responses:
+        '200':
+          description: Task executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '404':
+          description: Session not found
+        '500':
+          description: Internal server error during task execution
+
+components:
+  schemas:
+    CreateSessionRequest:
+      type: object
+      required:
+        - sessionName
+      properties:
+        sessionName:
+          type: string
+          description: The unique name for the new AI session.
+          example: new-ai-session
+    SessionResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Session 'new-ai-session' created successfully.
+    RunTaskRequest:
+      type: object
+      required:
+        - sessionName
+        - prompt
+      properties:
+        sessionName:
+          type: string
+          description: The name of the session to run the task in.
+          example: new-ai-session
+        prompt:
+          type: string
+          description: The AI task prompt.
+          example: "Summarize the key differences between Meta AI and other large language models."
+        model:
+          type: string
+          description: The AI model to use for the task.
+          example: gemma
+    TaskResponse:
+      type: object
+      properties:
+        output:
+          type: string
+          description: The AI's response to the prompt.
+          example: "Meta AI, with its focus on open-source contributions..."
+        duration:
+          type: number
+          description: The time taken to execute the task in milliseconds.
+          example: 1250
