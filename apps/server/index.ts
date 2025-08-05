@@ -14,3 +14,5 @@ app.use('/agents', agentRouter);
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+agentManager.registerAgentHandler('claude-agent', () => import('./agents/claudeAgent').then(m => m.claudeAgent));
+agentManager.registerAgentHandler('tmux-agent', () => import('./agents/tmuxAgent').then(m => m.tmuxAgent));
