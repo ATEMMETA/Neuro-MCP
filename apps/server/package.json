@@ -34,3 +34,11 @@
     "shell-quote": "^1.8.1"
   }
 }
+{
+  "lint-staged": {
+    "src/**/*.{ts,tsx,json,md}": [
+      "prettier --write",
+      "eslint --fix"
+    ]
+  }
+}
