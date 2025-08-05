@@ -1,0 +1,40 @@
+# #APIContracts - OpenAPI spec for MCP backend APIs
+openapi: 3.0.3
+info:
+  title: my-tmux-project API
+  version: 1.0.0
+  description: API for managing and executing agents in my-tmux-project
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+  /agents/{id}:
+    get:
+      summary: Execute an agent by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent execution result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
