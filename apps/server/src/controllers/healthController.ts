@@ -37,3 +37,17 @@ router.get('/metrics', async (_req, res) => {
 });
 
 export default router;
+import { Router } from 'express';
+const router = Router();
+
+router.get('/health', (_req, res) => res.status(200).send('OK'));
+router.get('/ready', (_req, res) => {
+  // Add logic to check dependencies (e.g., Tmux availability)
+  res.status(200).send('READY');
+});
+router.get('/metrics', (_req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.send(`# HELP http_requests_total Total HTTP requests\nhttp_requests_total{method="get"} 1027`);
+});
+
+export default router;
