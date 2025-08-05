@@ -5,3 +5,10 @@
   "whenToUse": "Server-side tmux orchestration",
   "entryPoint": "tmuxAgent.ts"
 }
+{
+  "name": "tmux-agent",
+  "description": "Manages tmux sessions, captures content, sends commands, and runs AI tasks",
+  "allowedTools": ["Bash", "AI"],
+  "whenToUse": "Server-side tmux orchestration and AI task execution",
+  "entryPoint": "tmuxAgent.ts"
+}
