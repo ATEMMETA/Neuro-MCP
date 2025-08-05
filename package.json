@@ -75,3 +75,20 @@
     "dev": "ts-node src/index.ts"
   }
 }
+{
+  "name": "mcp-server",
+  "version": "1.0.0",
+  "description": "Meta-AI Control Plane server",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "test": "jest",
+    "mcp": "ts-node src/cli/mcp-cli.ts"
+  },
+  "bin": {
+    "mcp": "dist/cli/mcp-cli.js"
+  },
+  // ... rest of your package.json
+}
