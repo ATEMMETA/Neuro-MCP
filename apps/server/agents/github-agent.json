@@ -1,0 +1,7 @@
+{
+  "name": "github-agent",
+  "description": "An agent to interact with the GitHub API for issues and pull requests.",
+  "allowedTools": ["listIssues", "createIssue", "createComment"],
+  "whenToUse": "For automating tasks within a GitHub repository",
+  "entryPoint": "githubAgent.ts"
+}
