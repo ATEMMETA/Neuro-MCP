@@ -1,0 +1,7 @@
+{
+  "name": "tmux-agent",
+  "description": "Tmux control agent",
+  "allowedTools": ["listSessions", "captureWindow", "sendCommand"],
+  "whenToUse": "Server-side tmux orchestration",
+  "entryPoint": "tmuxAgent.ts"
+}
