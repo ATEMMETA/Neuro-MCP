@@ -69,3 +69,9 @@
     "swagger-ui-express": "^5.0.0"
   }
 }
+{
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts"
+  }
+}
