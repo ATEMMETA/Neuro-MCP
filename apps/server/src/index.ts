@@ -118,3 +118,30 @@ process.on('SIGTERM', () => {
   logger.info('Received SIGTERM. Shutting down gracefully...');
   process.exit(0);
 });
+// apps/server/src/index.ts (refined logger config)
+import pino from 'pino';
+import { pinoLoki } from 'pino-loki';
+
+// Loki credentials from your Grafana Cloud account
+const LOKI_URL = process.env.LOKI_URL; // e.g., 'https://<id>.<region>.grafana.net/loki/api/v1/push'
+const LOKI_USERNAME = process.env.LOKI_USERNAME;
+const LOKI_PASSWORD = process.env.LOKI_PASSWORD;
+
+// Default logger config
+const baseLogger = pino();
+
+// Conditional transport for production/staging environments
+const logger = LOKI_URL && LOKI_USERNAME && LOKI_PASSWORD ? pino({
+  transport: {
+    target: 'pino-loki',
+    options: {
+      labels: { app: 'mcp-server' },
+      batch: true,
+      interval: 5,
+      host: LOKI_URL,
+      username: LOKI_USERNAME,
+      password: LOKI_PASSWORD,
+    }
+  }
+}) : baseLogger;
+
