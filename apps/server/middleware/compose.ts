@@ -1,6 +1,9 @@
 // apps/server/middleware/compose.ts
 
 import { RequestHandler } from 'express';
+import helmet from 'helmet';
+app.use(helmet());
+
 
 /**
  * Composes multiple middleware functions into one middleware.
