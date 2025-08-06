@@ -2,17 +2,25 @@
  * agentController.ts
  *
  * Express routes for agent management and execution.
+ * Supports creating agents, dynamically validated running of agents,
+ * enqueuing tasks for async processing, and offline queue endpoint.
  */
 
 import { Router, Request, Response } from 'express';
 import { validateBody } from '../middleware/validationMiddleware';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { AgentManager, Logger } from '../services/AgentManager';
-import { agentConfigSchema, agentTaskSchema } from '../utils/validation/agentSchema';
+import {
+  agentConfigSchema,
+  agentTaskSchema,
+  claudeAgentTaskSchema,
+  tmuxAgentTaskSchema,
+  githubAgentTaskSchema,
+} from '../utils/validation/agentSchema';
 import { trace } from '@opentelemetry/api';
 import { agentQueue } from '../jobs/agentProcessor';
 import { RunAgentPayload } from '../types/api.types';
-import { StatusCodes } from 'http-status-codes'; // For readable HTTP status codes
+import { StatusCodes } from 'http-status-codes';
 
 interface SuccessResponse<T> {
   success: true;
@@ -25,9 +33,6 @@ interface ErrorResponse {
   details?: any;
 }
 
-/**
- * Custom error class to represent HTTP errors.
- */
 class HttpError extends Error {
   public statusCode: number;
   public details?: any;
@@ -36,23 +41,21 @@ class HttpError extends Error {
     super(message);
     this.statusCode = statusCode;
     this.details = details;
-    Object.setPrototypeOf(this, new.target.prototype); // restore prototype chain
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
-/**
- * Creates a router with agent-related routes.
- * @param logger Logger instance
- * @param agentManager AgentManager instance
- * @returns Express Router
- */
+// Map of agent task validation schemas by agent name
+const schemas: Record<string, ReturnType<typeof agentTaskSchema>> = {
+  'claude-agent': claudeAgentTaskSchema,
+  'tmux-agent': tmuxAgentTaskSchema,
+  'github-agent': githubAgentTaskSchema,
+};
+
 export function createAgentRouter(logger: Logger, agentManager: AgentManager): Router {
   const router = Router();
 
-  /**
-   * POST /create
-   * Create a new agent with the given config.
-   */
+  // POST /create
   router.post(
     '/create',
     validateBody(agentConfigSchema, logger),
@@ -79,13 +82,15 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
     }, logger)
   );
 
-  /**
-   * POST /:name/run
-   * Validate and enqueue agent task for asynchronous processing.
-   */
+  // POST /:name/run with dynamic validation schema selection
   router.post(
     '/:name/run',
-    validateBody(agentTaskSchema, logger),
+    // Middleware to dynamically select schema based on agent name
+    (req, res, next) => {
+      const agentName = req.params.name;
+      const schema = schemas[agentName] || agentTaskSchema;
+      return validateBody(schema, logger)(req, res, next);
+    },
     asyncHandler(async (req: Request, res: Response<SuccessResponse<{ jobId: string }> | ErrorResponse>) => {
       const tracer = trace.getTracer('my-tmux-project');
       return await tracer.startActiveSpan('run-agent', async (span) => {
@@ -109,6 +114,35 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
           span.recordException(error);
           span.setStatus({ code: 2, message: error.message });
           throw new HttpError('Failed to enqueue agent task', StatusCodes.INTERNAL_SERVER_ERROR, error);
+        } finally {
+          span.end();
+        }
+      });
+    }, logger)
+  );
+
+  // POST /queue - for offline/mobile CLI async task enqueueing
+  router.post(
+    '/queue',
+    validateBody(agentTaskSchema, logger),
+    asyncHandler(async (req: Request, res: Response<SuccessResponse<{ jobId: string }> | ErrorResponse>) => {
+      const tracer = trace.getTracer('my-tmux-project');
+      return await tracer.startActiveSpan('queue-agent-task', async (span) => {
+        try {
+          const taskPayload: RunAgentPayload = req.body;
+          const job = await agentQueue.add('runAgentTask', { agentName: taskPayload.agentName, task: taskPayload });
+
+          res.status(StatusCodes.ACCEPTED).json({
+            success: true,
+            data: {
+              jobId: job.id,
+            },
+          });
+        } catch (error: any) {
+          logger.error({ error, reqId: req.id, url: req.url }, 'Failed to enqueue offline agent task');
+          span.recordException(error);
+          span.setStatus({ code: 2, message: error.message });
+          throw new HttpError('Failed to enqueue offline agent task', StatusCodes.INTERNAL_SERVER_ERROR, error);
         } finally {
           span.end();
         }
