@@ -1,0 +1,29 @@
+groups:
+  - name: mcp-server-alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on MCP server"
+          description: "More than 5% errors in the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 5000000000 # 5GB
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on MCP server"
+          description: "Memory usage above 5GB for the last 2 minutes."
+
+      - alert: HighCpuUsage
+        expr: rate(process_cpu_seconds_total[1m]) > 0.9
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on MCP server"
+          description: "CPU usage above 90% for the last 2 minutes."
