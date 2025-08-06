@@ -1,1 +1,17 @@
 # Kubernetes service spec #Networking
+# k8s/service.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-tmux-project-service
+  labels:
+    app: my-tmux-project
+spec:
+  selector:
+    app: my-tmux-project
+  ports:
+    - protocol: TCP
+      port: 80           # External port
+      targetPort: 3000   # Container port your Express server listens on
+  type: ClusterIP       # Use LoadBalancer or NodePort if external exposure needed
+
