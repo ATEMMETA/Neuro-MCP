@@ -32,18 +32,19 @@ declare global {
   }
 }
 
-// Logger (from utils/logger.ts)
+// Import your centralized logger (pino or similar)
 import { logger } from './utils/logger';
 
-// Initialize OpenTelemetry
+// Initialize OpenTelemetry tracing
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces';
 initializeTracing('my-tmux-project', otlpEndpoint);
 
-// Initialize API keys and JWT secret
+// Load API keys and JWT secret from environment variables
 const API_KEYS = new Set(
-  process.env.API_KEYS?.split(',').map((key) => key.trim()) || []
+  process.env.API_KEYS?.split(',').map((key) => key.trim()).filter(Boolean) || []
 );
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || '';
+
 if (API_KEYS.size === 0 && !JWT_SECRET) {
   logger.error({}, 'No API_KEYS or JWT_SECRET set. Exiting.');
   process.exit(1);
@@ -52,23 +53,21 @@ if (API_KEYS.size === 0 && !JWT_SECRET) {
 // Initialize Express app
 const app = express();
 
-// Initialize AgentManager
+// Initialize AgentManager singleton & register agents
 const agentManager = AgentManager.getInstance(logger);
-
-// Register agent handlers
 agentManager.registerAgentHandler('claude-agent', claudeAgent);
 agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
 
-// Apply global middleware
-app.use(helmet()); // Secure HTTP headers
-app.use(cors()); // Enable CORS
-app.use(express.json()); // Parse JSON bodies
-app.use(attachRequestId(logger)); // Attach request IDs
-app.use(pinoHttp({ logger })); // HTTP request logging
+// --- Global middleware ---
+app.use(helmet()); // Security headers
+app.use(cors()); // Enable CORS; customize origin as needed
+app.use(express.json()); // JSON body parsing
+app.use(attachRequestId(logger)); // Attach unique request IDs
+app.use(pinoHttp({ logger })); // HTTP request logging with pino
 
-// Global rate limiting
+// Global rate limiter for all routes
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
+  windowMs: 15 * 60 * 1000, // 15min window
   max: 100,
   message: { success: false, error: 'Too many requests, please try later.' },
   standardHeaders: true,
@@ -76,42 +75,46 @@ const apiLimiter = rateLimit({
 });
 app.use(apiLimiter);
 
-// Agent-specific rate limiting
+// Agent routes-specific rate limiter for stricter limits
 const agentLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 min
+  windowMs: 5 * 60 * 1000, // 5min window
   max: 20,
   message: { success: false, error: 'Too many agent requests, please try later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Swagger API docs
+// Swagger API docs accessible publicly
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// Routes
-app.use('/health', healthRouter); // No auth needed
+// Public health route — no auth required
+app.use('/health', healthRouter);
+
+// Secured agent routes: composed middleware of authentication + agentLimiter
 app.use(
   '/agents',
   compose([authenticate(logger, API_KEYS, JWT_SECRET), agentLimiter], logger),
   createAgentRouter(logger, agentManager)
 );
 
-// Global error handling
+// Centralized error handler middleware (must be last)
 app.use(errorHandler(logger));
 
-// Start server
+// Start the server
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   logger.info({}, `🚀 Server is running on port ${PORT}`);
 });
 
-// Graceful shutdown
+// Graceful Shutdown Handling
 process.on('SIGTERM', () => {
   logger.info({}, 'SIGTERM received: shutting down gracefully...');
   server.close(() => {
     logger.info({}, 'HTTP server closed');
     process.exit(0);
   });
+
+  // Force exit after 10 seconds if shutdown hangs
   setTimeout(() => {
     logger.error({}, 'Shutdown timed out. Forcing exit.');
     process.exit(1);
