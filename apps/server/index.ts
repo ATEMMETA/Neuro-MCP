@@ -1,35 +1,92 @@
-// #Bootstrap - Main Express server entrypoint for my-tmux-project
+/**
+ * apps/server/index.ts
+ *
+ * Main Express server entrypoint — improved from minimal version.
+ */
 
 import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import pinoHttp from 'pino-http';
+import rateLimit from 'express-rate-limit';
+import swaggerUi from 'swagger-ui-express';
+
 import { router as healthRouter } from './controllers/healthController';
 import { router as agentRouter } from './controllers/agentController';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(express.json());
-app.use('/health', healthRouter);
-app.use('/agents', agentRouter);
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-agentManager.registerAgentHandler('claude-agent', () => import('./agents/claudeAgent').then(m => m.claudeAgent));
-agentManager.registerAgentHandler('tmux-agent', () => import('./agents/tmuxAgent').then(m => m.tmuxAgent));
+import { AgentManager } from './services/AgentManager';
+import { claudeAgent } from './agents/claudeAgent';
 import { tmuxAgent } from './agents/tmuxAgent';
 
-// After creating agentManager instance
+import { logger, attachRequestId } from './middleware/requestId.middleware';
+import { authenticate } from './middleware/authMiddleware';
+import errorHandler from './middleware/errorHandler';
+import { swaggerSpec } from './config/swagger';
+
+const app = express();
+
+const PORT = Number(process.env.PORT) || 3000;
+
+// Register agent handlers upfront
+const agentManager = AgentManager.getInstance();
+agentManager.registerAgentHandler('claude-agent', claudeAgent);
 agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
 
-// Add API endpoint for AI tasks
-app.post('/agents/:name/run-ai', async (req, res) => {
-  const agentName = req.params.name;
-  const task = { action: 'runAITask', sessionName: req.body.sessionName, prompt: req.body.prompt, model: req.body.model };
-  try {
-    const result = await agentManager.runAgent(agentName, task);
-    res.json({ success: true, result });
-  } catch (e: any) {
-    logger.error({ reqId: (req as any).id, error: e.message }, 'AI task error');
-    res.status(500).json({ success: false, error: e.message });
-  }
+// --- Middleware ---
+app.use(helmet()); // For secure HTTP headers
+app.use(cors()); // Enable CORS (adjust options if needed)
+app.use(express.json()); // JSON request body parsing
+app.use(attachRequestId); // Add unique request IDs to each request
+app.use(pinoHttp({ logger })); // HTTP request logging with Pino
+
+// Rate limiting (global)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 100,
+  message: 'Too many requests from this IP, please try later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(apiLimiter);
+
+// Swagger API docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// Health endpoint - no auth needed
+app.use('/health', healthRouter);
+
+// Protection and rate limiting on agents route
+app.use('/agents', authenticate);
+
+const agentLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 min
+  max: 20,
+  message: 'Too many agent requests, please try later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/agents', agentLimiter);
+
+// Agents routes
+app.use('/agents', agentRouter);
+
+// Centralized error handling middleware - must be last
+app.use(errorHandler);
+
+// Start server
+const server = app.listen(PORT, () => {
+  logger.info(`🚀 Server is running on port ${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received: shutting down gracefully...');
+  server.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.error('Shutdown timed out. Forcing exit.');
+    process.exit(1);
+  }, 10000);
 });
