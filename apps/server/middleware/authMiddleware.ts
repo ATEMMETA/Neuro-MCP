@@ -1,6 +1,9 @@
 # Authentication for securing endpoints #Security
 import { Request, Response, NextFunction } from 'express';
 import { logger } from './requestId.middleware';
+import helmet from 'helmet';
+app.use(helmet());
+
 
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
