@@ -1,16 +1,20 @@
 /**
- * index.ts
+ * src/index.ts
  *
- * Main Express server entrypoint, integrating AgentManager, authentication,
- * request ID, validation, error handling, middleware composition, and tracing.
+ * Main Express server entrypoint.
+ * Integrates AgentManager, authentication, request ID assignment,
+ * validation, error handling, middleware composition, OpenTelemetry tracing,
+ * graceful shutdown, config validation, enhanced CORS, version endpoint,
+ * and Prometheus metrics.
  */
 
-import express, { RequestHandler } from 'express';
+import express, { RequestHandler, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
+import { execSync } from 'child_process';
 
 import { swaggerSpec } from './config/swagger';
 import { AgentManager } from './services/AgentManager';
@@ -24,10 +28,29 @@ import { createAgentRouter } from './controllers/agentController';
 import errorHandler from './middleware/errorHandler';
 import { initializeTracing } from './monitoring/opentelemetry';
 import { config } from './config/env';
-import { connectDB } from './services/dbService';
+import { connectDB, closeDB } from './services/dbService'; // Add closeDB to cleanly disconnect if you don't have it
+import cacheService from './services/cacheService'; // For graceful shutdown disconnect cleanup
+
+// Utility: execute git commands for version info
+function getGitCommitHash(): string | null {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim();
+  } catch {
+    return null;
+  }
+}
+
+// Middleware: version endpoint for health checks and debugging
+function versionEndpoint(_req: Request, res: Response) {
+  res.json({
+    version: config.APP_VERSION || 'unknown',
+    commitHash: config.COMMIT_HASH || getGitCommitHash() || 'unknown',
+    environment: config.NODE_ENV || 'unknown',
+  });
+}
 
 async function startServer() {
-  // Validate essential configs early
+  // 1. Validate essential environment variables upfront
   if (!config.PORT) {
     logger.error('Missing PORT env var');
     process.exit(1);
@@ -37,44 +60,71 @@ async function startServer() {
     process.exit(1);
   }
 
-  // Initialize OpenTelemetry tracing
-  const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces';
-  initializeTracing('my-tmux-project', otlpEndpoint);
+  // 2. Initialize distributed tracing
+  initializeTracing(
+    'my-tmux-project',
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces'
+  );
 
-  // Connect to databases/services before starting server
+  // 3. Connect to databases, cache, queues, etc.
   await connectDB();
+  await cacheService.connect?.(); // if cacheService has connect method
 
-  // Create Express app
+  // 4. Create Express app
   const app = express();
 
-  // Initialize AgentManager and register agent handlers
+  // 5. Initialize AgentManager and register your agents
   const agentManager = AgentManager.getInstance(logger);
   agentManager.registerAgentHandler('claude-agent', claudeAgent);
   agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
   agentManager.registerAgentHandler('github-agent', githubAgent);
 
-  // Compose and mount global middlewares
+  // 6. Compose global middlewares neatly
   const globalMiddlewares: RequestHandler[] = [
-    helmet(),
-    cors({ origin: ['https://your-frontend.com'], credentials: true }),
-    express.json(),
+    helmet({
+      // Add additional helmet security policies if needed
+      contentSecurityPolicy: false,
+      hsts: { maxAge: 31536000, includeSubDomains: true },
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+    cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like curl)
+        if (!origin) return callback(null, true);
+        if ((config.CORS_ORIGINS || '').split(',').includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('CORS policy violation'));
+        }
+      },
+      credentials: true,
+      optionsSuccessStatus: 204, // For legacy browsers preflight support
+      preflightContinue: false,
+    }),
+    express.json({ limit: '10mb' }), // Protect from large body attacks
     attachRequestId,
     pinoHttp({ logger }),
     rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 100,
+      standardHeaders: true,
+      legacyHeaders: false,
       message: { success: false, error: 'Too many requests, please try again later' },
+      skipSuccessfulRequests: true,
     }),
   ];
   globalMiddlewares.forEach((mw) => app.use(mw));
 
-  // Swagger API documentation
+  // 7. Swagger API documentation endpoint (optionally protected in prod)
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-  // Public health endpoints
+  // 8. Simple version info endpoint for operational support
+  app.get('/version', versionEndpoint);
+
+  // 9. Health endpoints (Prometheus instrumented)
   app.use('/health', healthController);
 
-  // Middleware stack for agent routes: authentication + stricter rate limiting
+  // 10. Agent routes with stricter rate limiting + authentication
   const agentMiddlewares: RequestHandler[] = [
     authenticate(
       logger,
@@ -85,38 +135,55 @@ async function startServer() {
       windowMs: 5 * 60 * 1000,
       max: 20,
       message: { success: false, error: 'Too many agent requests, please try again later' },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: true,
     }),
   ];
 
-  // Mount agent REST API router with agent-related middlewares
+  // Mount these middlewares appropriately (order matters!)
   agentMiddlewares.forEach((mw) => app.use('/agents', mw));
   app.use('/agents', createAgentRouter(logger, agentManager));
 
-  // Centralized error handling (last)
+  // 11. Centralized error handler (must be last!)
   app.use(errorHandler);
 
-  // Start the server
+  // 12. Start server
   const server = app.listen(config.PORT, () => {
-    logger.info(`🚀 Server running on port ${config.PORT}`);
+    logger.info({}, `🚀 Server running on port ${config.PORT}`);
   });
 
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully...');
-    server.close(() => {
-      logger.info('HTTP server closed, exiting');
-      process.exit(0);
-    });
-    setTimeout(() => {
-      logger.error('Shutdown timeout reached, forcing exit');
+  // 13. Graceful shutdown handling with full resource cleanup
+  async function shutdownHandler(signal: string) {
+    try {
+      logger.info({}, `${signal} received: shutting down gracefully...`);
+      server.close(async () => {
+        // Close DB, Cache, Queues, etc.
+        await closeDB();
+        await cacheService.disconnect?.();
+        await agentManager.shutdown?.(); // If you add a shutdown method for cleanup in AgentManager
+        logger.info({}, 'HTTP server closed, all resources cleaned up, exiting');
+        process.exit(0);
+      });
+
+      // Force exit if shutdown takes too long
+      setTimeout(() => {
+        logger.error({}, 'Shutdown timeout reached, forcing exit!');
+        process.exit(1);
+      }, 10000);
+    } catch (err) {
+      logger.error({ err }, 'Error during shutdown');
       process.exit(1);
-    }, 10000);
-  });
+    }
+  }
+
+  // Listen for termination signals
+  process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
+  process.on('SIGINT', () => shutdownHandler('SIGINT'));
 }
 
-// Start server and catch initialization errors
+// Run the server startup logic and catch errors
 startServer().catch((err) => {
   logger.error({ err }, 'Failed to start server');
   process.exit(1);
 });
-
