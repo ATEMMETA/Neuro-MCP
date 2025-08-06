@@ -19,6 +19,11 @@ import agentController from './controllers/agentController';
 import errorHandler from './middleware/errorHandler';
 import { connectDB } from './services/dbService';
 
+import { config } from './config/env';
+
+console.log(`Starting server on port ${config.PORT}`);
+// use config.PORT, config.API_KEY, etc. safely
+
 // Middleware composition helper
 function compose(middlewares: RequestHandler[]): RequestHandler {
   return (req, res, next) => {
