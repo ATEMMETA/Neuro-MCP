@@ -1,1 +1,13 @@
-# Prometheus metrics configuration #Metrics
+# apps/server/monitoring/prometheus.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'mcp-server'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:3000']  # Adjust host & port where your Prometheus endpoint is exposed
+
+  # Add other scrape targets/services as needed
