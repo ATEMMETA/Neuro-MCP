@@ -1,32 +1,24 @@
 # Adds unique request IDs for tracing #Logging
-// apps/server/src/middleware/requestId.middleware.ts
-import pino from 'pino';
 import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-
-// Configure Pino logger
-export const logger = pino({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  base: { pid: process.pid },
-});
-
-// Middleware to attach a unique request ID
-export function attachRequestId(req: Request, res: Response, next: NextFunction) {
-  (req as any).id = randomUUID();
-  res.setHeader('X-Request-Id', (req as any).id);
-  next();
-}
 import { logger } from '../utils/logger';
 
-export function attachRequestId(req, _res, next) {
-  // Assuming you generate or retrieve a requestId here
-  const requestId = req.headers['x-request-id'] || generateUniqueRequestId();
+/**
+ * Middleware to attach a unique request ID to each incoming request,
+ * exposes it in response headers, and logs request receipt.
+ */
+export function attachRequestId(req: Request, res: Response, next: NextFunction) {
+  // Use existing request ID header if present (e.g., from upstream proxy)
+  const requestId = req.headers['x-request-id'] as string || randomUUID();
 
-  // Attach request ID to req for later use
-  req.id = requestId;
+  // Attach to request for downstream use
+  (req as any).id = requestId;
 
-  // Log a message with requestId context
-  logger.info({ reqId: requestId }, 'Received new request');
+  // Expose ID in response headers for clients/tracing tools
+  res.setHeader('X-Request-Id', requestId);
+
+  // Log request start with ID
+  logger.info({ reqId: requestId, method: req.method, url: req.url }, 'Received new request');
 
   next();
 }
