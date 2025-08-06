@@ -1,41 +1,36 @@
-# Adds unique request IDs for tracing #Logging
+/**
+ * requestId.middleware.ts
+ *
+ * Middleware to attach a unique request ID to each incoming request,
+ * expose it in response headers, and log request receipt.
+ * Supports existing x-request-id headers from upstream proxies.
+ */
+
 import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-import { logger } from '../utils/logger';
-import helmet from 'helmet';
-app.use(helmet());
-import { validateBody } from './middleware/validationMiddleware';
-import { agentConfigSchema } from './validation/agentSchema';
+import { Logger } from './AgentManager';
 
-router.post('/create', validateBody(agentConfigSchema), async (req, res) => {
-  // validated at this point
-});
+export function attachRequestId(logger: Logger) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    // Sanitize incoming x-request-id header (allow only alphanumeric and hyphens)
+    let requestId = (req.headers['x-request-id'] as string) || randomUUID();
+    if (requestId && !/^[a-zA-Z0-9-]+$/.test(requestId)) {
+      logger.warn(
+        { invalidId: requestId, method: req.method, url: req.url },
+        'Invalid x-request-id header, generating new ID'
+      );
+      requestId = randomUUID();
+    }
 
-const asyncHandler = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
+    // Attach to request for downstream use
+    req.id = requestId;
 
-// Usage:
-app.post('/agents/:name/run', asyncHandler(async (req, res) => {
-  const result = await agentManager.runAgent(req.params.name, req.body);
-  res.json({ success: true, result });
-}));
+    // Expose ID in response headers for clients/tracing tools
+    res.setHeader('X-Request-Id', requestId);
 
-/**
- * Middleware to attach a unique request ID to each incoming request,
- * exposes it in response headers, and logs request receipt.
- */
-export function attachRequestId(req: Request, res: Response, next: NextFunction) {
-  // Use existing request ID header if present (e.g., from upstream proxy)
-  const requestId = req.headers['x-request-id'] as string || randomUUID();
+    // Log request start with ID
+    logger.info({ reqId: requestId, method: req.method, url: req.url, ip: req.ip }, 'Received new request');
 
-  // Attach to request for downstream use
-  (req as any).id = requestId;
-
-  // Expose ID in response headers for clients/tracing tools
-  res.setHeader('X-Request-Id', requestId);
-
-  // Log request start with ID
-  logger.info({ reqId: requestId, method: req.method, url: req.url }, 'Received new request');
-
-  next();
+    next();
+  };
 }
