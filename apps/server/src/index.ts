@@ -1,4 +1,6 @@
-import express from 'express';
+// apps/server/src/index.ts
+
+import express, { RequestHandler } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
@@ -17,6 +19,28 @@ import agentController from './controllers/agentController';
 import errorHandler from './middleware/errorHandler';
 import { connectDB } from './services/dbService';
 
+// Middleware composition helper
+function compose(middlewares: RequestHandler[]): RequestHandler {
+  return (req, res, next) => {
+    let index = -1;
+    function dispatch(i: number): void {
+      if (i <= index) return next(new Error('next() called multiple times'));
+      index = i;
+      const fn = middlewares[i];
+      if (!fn) return next();
+      try {
+        fn(req, res, (err?: any) => {
+          if (err) return next(err);
+          dispatch(i + 1);
+        });
+      } catch (err) {
+        next(err);
+      }
+    }
+    dispatch(0);
+  };
+}
+
 if (!process.env.PORT) {
   logger.error('Missing PORT env var');
   process.exit(1);
@@ -26,57 +50,57 @@ const app = express();
 const port = Number(process.env.PORT);
 
 (async () => {
-  // Connect to DB before starting server
   await connectDB();
 
-  // Setup middleware
-  app.use(helmet());
-  app.use(cors({ origin: ['https://your-frontend.com'], credentials: true }));
-  app.use(express.json());
-  app.use(attachRequestId);
-  app.use(pinoHttp({ logger }));
-
-  const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: 'Too many requests, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-  app.use(apiLimiter);
-
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-  app.use('/health', healthController);
-
-  // Register agents
+  // Register agents early
   const agentManager = AgentManager.getInstance();
   agentManager.registerAgentHandler('claude-agent', claudeAgent);
   agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
   agentManager.registerAgentHandler('github-agent', githubAgent);
 
-  // Protect /agents routes
-  app.use('/agents', authenticate);
+  // Global middlewares composed
+  const globalMiddlewares = compose([
+    helmet(),
+    cors({ origin: ['https://your-frontend.com'], credentials: true }),
+    express.json(),
+    attachRequestId,
+    pinoHttp({ logger }),
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      message: 'Too many requests, please try again later.',
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  ]);
+  app.use(globalMiddlewares);
 
-  const agentLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000,
-    max: 20,
-    message: 'Too many agent requests, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-  app.use('/agents', agentLimiter);
+  // Swagger docs
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-  app.use('/agents', agentController);
+  // Public health routes without auth
+  app.use('/health', healthController);
 
-  // Error handler last
+  // Middleware stack for /agents routes (auth + stricter rate limit)
+  const agentsMiddlewares = compose([
+    authenticate,
+    rateLimit({
+      windowMs: 5 * 60 * 1000,
+      max: 20,
+      message: 'Too many agent requests, please try again later.',
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  ]);
+  app.use('/agents', agentsMiddlewares, agentController);
+
+  // Centralized error handler at the end
   app.use(errorHandler);
 
   const server = app.listen(port, () => {
-    logger.info(`Server running at http://localhost:${port}`);
+    logger.info(`🚀 Server running at http://localhost:${port}`);
   });
 
-  // Graceful shutdown
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received, shutting down...');
     server.close(() => {
