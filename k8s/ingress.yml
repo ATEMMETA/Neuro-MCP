@@ -1,1 +1,21 @@
 # Kubernetes ingress for routing #Networking
+# k8s/ingress.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-tmux-project-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx    # Assuming nginx ingress controller
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: your.domain.com                # Change to your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-tmux-project-service
+                port:
+                  number: 80
