@@ -1,0 +1,15 @@
+# apps/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/apps/server"       # location of your package.json for backend
+    schedule:
+      interval: "daily"            # how often to check for updates (daily/weekly/monthly)
+    open-pull-requests-limit: 5
+    # Optionally add labels, reviewers etc. here
+
+  - package-ecosystem: "npm"
+    directory: "/apps/cli"          # CLI package.json location if separate
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
