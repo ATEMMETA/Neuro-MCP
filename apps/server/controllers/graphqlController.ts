@@ -1,27 +1,51 @@
 # Optional GraphQL API for flexible querying #FutureProof
 // apps/server/controllers/graphqlController.ts
-/**
- * Optional GraphQL API for flexible querying (#FutureProof)
- */
-
 import { Router } from 'express';
 import { graphqlHTTP } from 'express-graphql';
 import { buildSchema } from 'graphql';
+import { AgentManager } from '../services/AgentManager';
 
-// Sample GraphQL schema
 const schema = buildSchema(`
+  type Agent {
+    id: String!
+    name: String!
+    description: String
+    enabled: Boolean!
+  }
+
+  input AgentInput {
+    id: String
+    name: String!
+    description: String
+    enabled: Boolean
+  }
+
   type Query {
-    hello: String
-    agentStatus(agentId: String!): String
+    agents: [Agent!]!
+    agent(id: String!): Agent
+  }
+
+  type Mutation {
+    createAgent(input: AgentInput!): Agent
+    updateAgent(id: String!, input: AgentInput!): Agent
   }
 `);
 
-// Sample root resolver
 const root = {
-  hello: () => 'Hello world!',
-  agentStatus: (args: { agentId: string }) => {
-    // Integration with AgentManager or status service could go here
-    return `Status for agent ${args.agentId} is ACTIVE`;
+  agents: () => {
+    // Return list of agents from AgentManager
+    return AgentManager.listAgents();
+  },
+  agent: ({ id }: { id: string }) => {
+    return AgentManager.getAgentById(id);
+  },
+  createAgent: async ({ input }: { input: any }) => {
+    const id = await AgentManager.createAgent(input);
+    return AgentManager.getAgentById(id);
+  },
+  updateAgent: async ({ id, input }: { id: string; input: any }) => {
+    await AgentManager.updateAgent(id, input);
+    return AgentManager.getAgentById(id);
   },
 };
 
@@ -32,7 +56,7 @@ router.use(
   graphqlHTTP({
     schema,
     rootValue: root,
-    graphiql: process.env.NODE_ENV !== 'production', // Enable graphiql only in dev
+    graphiql: process.env.NODE_ENV !== 'production',
   })
 );
 
