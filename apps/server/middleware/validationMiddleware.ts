@@ -1,6 +1,9 @@
 import { NextFunction, Request, Response } from 'express';
 import { AnyZodObject, ZodError } from 'zod';
 import { logger } from '../utils/logger';
+import helmet from 'helmet';
+app.use(helmet());
+
 
 export const validateBody = (schema: AnyZodObject) => (req: Request, res: Response, next: NextFunction) => {
   const result = schema.safeParse(req.body);
