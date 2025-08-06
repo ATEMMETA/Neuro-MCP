@@ -3,6 +3,13 @@ import { AnyZodObject, ZodError } from 'zod';
 import { logger } from '../utils/logger';
 import helmet from 'helmet';
 app.use(helmet());
+import { validateBody } from './middleware/validationMiddleware';
+import { agentConfigSchema } from './validation/agentSchema';
+
+router.post('/create', validateBody(agentConfigSchema), async (req, res) => {
+  // validated at this point
+});
+
 
 
 export const validateBody = (schema: AnyZodObject) => (req: Request, res: Response, next: NextFunction) => {
