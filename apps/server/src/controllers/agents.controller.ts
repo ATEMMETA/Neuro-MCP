@@ -1,32 +1,40 @@
-// apps/server/src/controllers/agents.controller.ts (refined)
+/**
+ * agents.ws.controller.ts
+ *
+ * WebSocket handler for real-time execution of agents with live status/progress updates.
+ */
+
 import { Request, Response } from 'express';
 import { AgentManager } from '../services/AgentManager';
 import { logger } from '../middleware/requestId.middleware';
 import { WebSocket } from 'ws';
 
-export const executeAgent = (agentManager: AgentManager) => async (req: Request, res: Response) => {
+export const executeAgentWS = (agentManager: AgentManager) => async (req: Request & { ws?: WebSocket }, res: Response) => {
   const { agent, task } = req.body;
-  const wsClient: WebSocket = req.ws; // Assume a middleware to attach the WS instance
+  const wsClient = req.ws; // Assume WS client attached via middleware
+
+  if (!wsClient) {
+    return res.status(400).json({ success: false, error: 'WebSocket client not connected.' });
+  }
 
   if (!agent || !task) {
     return res.status(400).json({ success: false, error: 'Agent and task are required.' });
   }
 
   try {
-    // We'll simulate a long-running task to demonstrate WebSockets
     wsClient.send(JSON.stringify({ type: 'STATUS', message: 'Agent execution started...' }));
 
-    // ... (rest of your agent execution logic remains the same) ...
-    // Example of sending progress updates
+    // Send mock progress updates as example
     wsClient.send(JSON.stringify({ type: 'PROGRESS', percentage: 25, message: 'Processing data...' }));
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // ... agent returns final response ...
+
+    // Run agent task synchronously or however your AgentManager supports
+    const result = await agentManager.runAgent(agent, task);
 
     wsClient.send(JSON.stringify({ type: 'STATUS', message: 'Agent execution finished successfully!' }));
     wsClient.send(JSON.stringify({ type: 'RESULT', data: result }));
 
-    // The REST endpoint now just confirms the task was received
+    // Confirm task reception via REST
     res.status(202).json({ success: true, message: 'Task received, results will be sent via WebSocket.' });
 
   } catch (error) {
