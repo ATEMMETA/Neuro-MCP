@@ -1,1 +1,19 @@
-# Metadata for tmux control agent #AgentConfig
+{
+  "id": "tmux-agent",
+  "name": "Tmux Agent",
+  "description": "Agent to orchestrate and control tmux sessions for terminal multiplexing",
+  "version": "1.0.0",
+  "capabilities": [
+    "start-session",
+    "kill-session",
+    "send-keys",
+    "list-sessions"
+  ],
+  "enabled": true,
+  "metadata": {
+    "author": "Your Name or Team",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z",
+    "documentationUrl": "https://docs.yourproject.com/agents/tmux-agent"
+  }
+}
