@@ -1,1 +1,57 @@
 # Kubernetes deployment spec #Deployment
+# k8s/deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-tmux-project-deployment
+  labels:
+    app: my-tmux-project
+spec:
+  replicas: 2                            # Number of pod replicas
+  selector:
+    matchLabels:
+      app: my-tmux-project
+  template:
+    metadata:
+      labels:
+        app: my-tmux-project
+    spec:
+      containers:
+        - name: backend
+          image: your-docker-registry/my-tmux-project:latest  # Replace with your image
+          ports:
+            - containerPort: 3000      # Container port your app listens on
+          env:
+            - name: PORT
+              value: "3000"
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: my-tmux-project-secret
+                  key: apiKeys
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: my-tmux-project-secret
+                  key: jwtSecret
+            - name: REDIS_URL
+              value: redis://redis-master:6379
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
