@@ -1,4 +1,3 @@
-# .github/workflows/security-scan.yml
 name: Security Scan
 
 on:
@@ -9,13 +8,12 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 2 * * *" # Daily at 2 AM UTC
+    - cron: "0 2 * * *" # Daily scan at 2AM UTC
 
 jobs:
   codeql-analysis:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
@@ -27,16 +25,16 @@ jobs:
       - name: Autobuild
         uses: github/codeql-action/autobuild@v2
 
-      - name: Run CodeQL Analysis
+      - name: Analyze
         uses: github/codeql-action/analyze@v2
 
   snyk-scan:
-    name: Snyk Dependency Scan
+    name: Snyk Vulnerability Scan
     runs-on: ubuntu-latest
+    needs: codeql-analysis
     steps:
       - uses: actions/checkout@v3
-
-      - name: Run Snyk to check vulnerabilities
+      - name: Run Snyk Scan
         uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
