@@ -1,17 +1,29 @@
 # Health and readiness endpoints #Observability
-// apps/server/src/controllers/healthController.ts
-import { Router } from 'express';
+// apps/server/controllers/healthController.ts
+/**
+ * Health and readiness endpoints (#Observability)
+ */
+
+import { Router, Request, Response } from 'express';
+import client from 'prom-client';
+
 const router = Router();
 
-router.get('/health', (_req, res) => res.status(200).send('OK'));
-router.get('/ready', (_req, res) => {
-  // Add logic to check critical services (e.g., database connection, tmux status)
+router.get('/health', (_req: Request, res: Response) => {
+  res.status(200).send('OK');
+});
+
+router.get('/ready', async (_req: Request, res: Response) => {
+  // TODO: Add real health checks here (DB, agent connectivity, etc.)
+  // For example, await dbService.ping() or tmuxOrchestrator.status()
   res.status(200).send('READY');
 });
-router.get('/metrics', (_req, res) => {
-  // Prometheus metrics endpoint goes here
-  res.set('Content-Type', 'text/plain');
-  res.send(`# HELP http_requests_total Total HTTP requests\nhttp_requests_total{method="get"} 1027`);
+
+router.get('/metrics', async (_req: Request, res: Response) => {
+  // Serve Prometheus metrics collected via prom-client
+  res.set('Content-Type', client.register.contentType);
+  res.end(await client.register.metrics());
 });
 
 export default router;
+
