@@ -1,4 +1,9 @@
-// apps/server/src/index.ts
+/**
+ * index.ts
+ *
+ * Main Express server entrypoint, integrating AgentManager, authentication,
+ * request ID, validation, error handling, middleware composition, and tracing.
+ */
 
 import express, { RequestHandler } from 'express';
 import cors from 'cors';
@@ -15,56 +20,41 @@ import { githubAgent } from './agents/github-agent';
 import { attachRequestId, logger } from './middleware/requestId.middleware';
 import { authenticate } from './middleware/authMiddleware';
 import healthController from './controllers/healthController';
-import agentController from './controllers/agentController';
+import { createAgentRouter } from './controllers/agentController';
 import errorHandler from './middleware/errorHandler';
+import { initializeTracing } from './monitoring/opentelemetry';
+import { config } from './config/env';
 import { connectDB } from './services/dbService';
 
-import { config } from './config/env';
+async function startServer() {
+  // Validate essential configs early
+  if (!config.PORT) {
+    logger.error('Missing PORT env var');
+    process.exit(1);
+  }
+  if (!config.API_KEYS || !config.JWT_SECRET) {
+    logger.error('Missing API_KEYS or JWT_SECRET env vars');
+    process.exit(1);
+  }
 
-console.log(`Starting server on port ${config.PORT}`);
-// use config.PORT, config.API_KEY, etc. safely
+  // Initialize OpenTelemetry tracing
+  const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces';
+  initializeTracing('my-tmux-project', otlpEndpoint);
 
-// Middleware composition helper
-function compose(middlewares: RequestHandler[]): RequestHandler {
-  return (req, res, next) => {
-    let index = -1;
-    function dispatch(i: number): void {
-      if (i <= index) return next(new Error('next() called multiple times'));
-      index = i;
-      const fn = middlewares[i];
-      if (!fn) return next();
-      try {
-        fn(req, res, (err?: any) => {
-          if (err) return next(err);
-          dispatch(i + 1);
-        });
-      } catch (err) {
-        next(err);
-      }
-    }
-    dispatch(0);
-  };
-}
-
-if (!process.env.PORT) {
-  logger.error('Missing PORT env var');
-  process.exit(1);
-}
-
-const app = express();
-const port = Number(process.env.PORT);
-
-(async () => {
+  // Connect to databases/services before starting server
   await connectDB();
 
-  // Register agents early
-  const agentManager = AgentManager.getInstance();
+  // Create Express app
+  const app = express();
+
+  // Initialize AgentManager and register agent handlers
+  const agentManager = AgentManager.getInstance(logger);
   agentManager.registerAgentHandler('claude-agent', claudeAgent);
   agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
   agentManager.registerAgentHandler('github-agent', githubAgent);
 
-  // Global middlewares composed
-  const globalMiddlewares = compose([
+  // Compose and mount global middlewares
+  const globalMiddlewares: RequestHandler[] = [
     helmet(),
     cors({ origin: ['https://your-frontend.com'], credentials: true }),
     express.json(),
@@ -73,48 +63,60 @@ const port = Number(process.env.PORT);
     rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 100,
-      message: 'Too many requests, please try again later.',
-      standardHeaders: true,
-      legacyHeaders: false,
+      message: { success: false, error: 'Too many requests, please try again later' },
     }),
-  ]);
-  app.use(globalMiddlewares);
+  ];
+  globalMiddlewares.forEach((mw) => app.use(mw));
 
-  // Swagger docs
+  // Swagger API documentation
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-  // Public health routes without auth
+  // Public health endpoints
   app.use('/health', healthController);
 
-  // Middleware stack for /agents routes (auth + stricter rate limit)
-  const agentsMiddlewares = compose([
-    authenticate,
+  // Middleware stack for agent routes: authentication + stricter rate limiting
+  const agentMiddlewares: RequestHandler[] = [
+    authenticate(
+      logger,
+      new Set(config.API_KEYS.split(',').map((k) => k.trim())),
+      config.JWT_SECRET
+    ),
     rateLimit({
       windowMs: 5 * 60 * 1000,
       max: 20,
-      message: 'Too many agent requests, please try again later.',
-      standardHeaders: true,
-      legacyHeaders: false,
+      message: { success: false, error: 'Too many agent requests, please try again later' },
     }),
-  ]);
-  app.use('/agents', agentsMiddlewares, agentController);
+  ];
 
-  // Centralized error handler at the end
+  // Mount agent REST API router with agent-related middlewares
+  agentMiddlewares.forEach((mw) => app.use('/agents', mw));
+  app.use('/agents', createAgentRouter(logger, agentManager));
+
+  // Centralized error handling (last)
   app.use(errorHandler);
 
-  const server = app.listen(port, () => {
-    logger.info(`🚀 Server running at http://localhost:${port}`);
+  // Start the server
+  const server = app.listen(config.PORT, () => {
+    logger.info(`🚀 Server running on port ${config.PORT}`);
   });
 
+  // Graceful shutdown
   process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down...');
+    logger.info('SIGTERM received, shutting down gracefully...');
     server.close(() => {
-      logger.info('Server closed, exiting');
+      logger.info('HTTP server closed, exiting');
       process.exit(0);
     });
     setTimeout(() => {
-      logger.error('Forced shutdown!');
+      logger.error('Shutdown timeout reached, forcing exit');
       process.exit(1);
     }, 10000);
   });
-})();
+}
+
+// Start server and catch initialization errors
+startServer().catch((err) => {
+  logger.error({ err }, 'Failed to start server');
+  process.exit(1);
+});
+
