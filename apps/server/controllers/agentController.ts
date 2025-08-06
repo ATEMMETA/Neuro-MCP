@@ -1,9 +1,8 @@
 /**
  * agentController.ts
  *
- * Express routes for agent management and execution.
- * Supports creating agents, dynamically validated running of agents,
- * enqueuing tasks for async processing, and offline queue endpoint.
+ * RESTful Express routes for agent management, task queuing,
+ * dynamic validation, and error handling.
  */
 
 import { Router, Request, Response } from 'express';
@@ -55,7 +54,7 @@ const schemas: Record<string, ReturnType<typeof agentTaskSchema>> = {
 export function createAgentRouter(logger: Logger, agentManager: AgentManager): Router {
   const router = Router();
 
-  // POST /create
+  // POST /create - Create agent
   router.post(
     '/create',
     validateBody(agentConfigSchema, logger),
@@ -64,11 +63,8 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
       return await tracer.startActiveSpan('create-agent', async (span) => {
         try {
           span.setAttribute('agent.id', req.body.id);
-
           const agentId = await agentManager.createAgent(req.body);
-
           span.setAttribute('agent.created', agentId);
-
           res.status(StatusCodes.CREATED).json({ success: true, data: { agentId } });
         } catch (error: any) {
           logger.error({ error, reqId: req.id, url: req.url }, 'Failed to create agent');
@@ -82,10 +78,9 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
     }, logger)
   );
 
-  // POST /:name/run with dynamic validation schema selection
+  // POST /:name/run - Enqueue agent task with dynamic schema validation
   router.post(
     '/:name/run',
-    // Middleware to dynamically select schema based on agent name
     (req, res, next) => {
       const agentName = req.params.name;
       const schema = schemas[agentName] || agentTaskSchema;
@@ -96,7 +91,6 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
       return await tracer.startActiveSpan('run-agent', async (span) => {
         const agentName = req.params.name;
         const taskPayload: RunAgentPayload = req.body;
-
         span.setAttribute('agent.name', agentName);
         span.setAttribute('task.action', taskPayload.action);
 
@@ -105,9 +99,7 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
 
           res.status(StatusCodes.ACCEPTED).json({
             success: true,
-            data: {
-              jobId: job.id,
-            },
+            data: { jobId: job.id },
           });
         } catch (error: any) {
           logger.error({ error, reqId: req.id, agentName, url: req.url }, 'Failed to enqueue agent task');
@@ -121,7 +113,7 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
     }, logger)
   );
 
-  // POST /queue - for offline/mobile CLI async task enqueueing
+  // POST /queue - Offline/CLI enqueuing endpoint
   router.post(
     '/queue',
     validateBody(agentTaskSchema, logger),
@@ -134,9 +126,7 @@ export function createAgentRouter(logger: Logger, agentManager: AgentManager): R
 
           res.status(StatusCodes.ACCEPTED).json({
             success: true,
-            data: {
-              jobId: job.id,
-            },
+            data: { jobId: job.id },
           });
         } catch (error: any) {
           logger.error({ error, reqId: req.id, url: req.url }, 'Failed to enqueue offline agent task');
