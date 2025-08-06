@@ -10,6 +10,14 @@ router.post('/create', validateBody(agentConfigSchema), async (req, res) => {
   // validated at this point
 });
 
+const asyncHandler = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+
+// Usage:
+app.post('/agents/:name/run', asyncHandler(async (req, res) => {
+  const result = await agentManager.runAgent(req.params.name, req.body);
+  res.json({ success: true, result });
+}));
 
 
 export const validateBody = (schema: AnyZodObject) => (req: Request, res: Response, next: NextFunction) => {
