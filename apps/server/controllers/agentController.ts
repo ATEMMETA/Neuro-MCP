@@ -1,33 +1,26 @@
 // apps/server/controllers/agentController.ts
-/**
- * #AgentAPI - API routes for agent management and execution
- */
-
 import { Router, Request, Response } from 'express';
-import { AgentManager } from '../services/AgentManager';
+import { agentQueue } from '../jobs/agentProcessor';
+import { RunAgentPayload } from '../types/api.types';
 
 const router = Router();
 
-// Get agent details or execute agent by ID (adjust method if needed)
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
-    const agentId = req.params.id;
-    // Assuming AgentManager has a method to get agent info or execute
-    const result = await AgentManager.executeAgent(agentId);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to execute agent' });
-  }
-});
+// Enqueue an agent run task instead of running inline
+router.post('/:name/run', async (req: Request, res: Response) => {
+  const agentName = req.params.name;
+  const taskPayload: RunAgentPayload = req.body;
 
-// Create a new agent configuration
-router.post('/create', async (req: Request, res: Response) => {
   try {
-    const agentConfig = req.body;
-    const agentId = await AgentManager.createAgent(agentConfig);
-    res.json({ id: agentId });
+    const job = await agentQueue.add('runAgentTask', {
+      agentName,
+      task: taskPayload,
+    });
+    res.status(202).json({
+      message: 'Agent task enqueued',
+      jobId: job.id,
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create agent' });
+    res.status(500).json({ error: 'Failed to enqueue agent task' });
   }
 });
 
