@@ -2,6 +2,9 @@
 import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
+import helmet from 'helmet';
+app.use(helmet());
+
 
 /**
  * Middleware to attach a unique request ID to each incoming request,
