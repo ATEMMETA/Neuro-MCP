@@ -1,8 +1,10 @@
 /**
  * authMiddleware.ts
- * 
- * Middleware for securing Express endpoints with API key or JWT authentication,
- * request body validation, error handling, rate limiting, and OpenTelemetry tracing.
+ *
+ * Middleware for authenticating Express requests with API key or JWT,
+ * including role checks for admin-only endpoints.
+ * Also includes request body validation, async error handling,
+ * rate limiting, and OpenTelemetry tracing integration.
  */
 
 import { Request, Response, NextFunction, RequestHandler } from 'express';
@@ -29,10 +31,13 @@ declare global {
 
 /**
  * Middleware factory for authentication with API Key or JWT.
- * 
+ *
+ * Enforces admin role for routes containing '/create'.
+ *
  * @param logger - Logger instance for structured logging
  * @param apiKeys - Set of valid API keys
  * @param jwtSecret - JWT secret key for token verification
+ * @returns Express middleware handler
  */
 export function authenticate(
   logger: Logger,
@@ -48,7 +53,7 @@ export function authenticate(
       const apiKey = req.header('x-api-key');
       const authHeader = req.header('authorization');
 
-      // Check API key authentication
+      // API Key Authentication
       if (apiKey && apiKeys.has(apiKey)) {
         logger.info({ reqId: req.id, url: req.url, method: req.method }, 'Authenticated via API key');
         span.setAttribute('auth.method', 'api-key');
@@ -56,11 +61,20 @@ export function authenticate(
         return next();
       }
 
-      // Check JWT authentication
+      // JWT Authentication with role enforcement
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
         try {
-          jwt.verify(token, jwtSecret);
+          const payload = jwt.verify(token, jwtSecret) as { user: string; roles: string[] };
+
+          // Enforce admin role for sensitive routes
+          if (!payload.roles?.includes('admin') && req.path.includes('/create')) {
+            logger.warn({ reqId: req.id, url: req.url }, 'Forbidden: admin role required');
+            span.setStatus({ code: 1, message: 'Forbidden: admin role required' });
+            span.end();
+            return res.status(403).json({ success: false, error: 'Forbidden: Admin role required' });
+          }
+
           logger.info({ reqId: req.id, url: req.url, method: req.method }, 'Authenticated via JWT');
           span.setAttribute('auth.method', 'jwt');
           span.end();
@@ -77,7 +91,7 @@ export function authenticate(
         }
       }
 
-      // Unauthorized request if no valid auth given
+      // Unauthorized if no valid auth provided
       logger.warn(
         { reqId: req.id, url: req.url, method: req.method, ip: req.ip },
         'Unauthorized access attempt'
@@ -91,50 +105,63 @@ export function authenticate(
 
 /**
  * Validation middleware generator using Zod schema.
- * Validates request body asynchronously.
- * 
+ * Validates request body asynchronously and logs errors.
+ *
  * @param schema - Zod schema object
- * @param logger - Logger for error reporting
+ * @param logger - Logger instance for error reporting
+ * @returns Express middleware handler
  */
 export function validateBody(schema: z.ZodSchema, logger: Logger): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const validatedBody = await schema.parseAsync(req.body);
-      req.body = validatedBody; // Replace with parsed (typed) data
+      req.body = validatedBody; // Replace body with validated data
       next();
     } catch (error: any) {
       logger.error({ reqId: req.id, error }, 'Request body validation failed');
-      res.status(400).json({ success: false, error: 'Invalid request body', details: error.errors || error.message });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: error.errors || error.message,
+      });
     }
   };
 }
 
 /**
  * Async handler wrapper to catch errors from async route handlers.
- * 
- * @param fn - Async function to wrap
+ * Logs unhandled errors and responds with 500 status.
+ *
+ * @param fn - Async route handler function
+ * @returns Express middleware handler
  */
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
 ): RequestHandler => {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch((error) => {
-      // Fallback logger or improve by injecting logger instance as needed
-      console.error(`Unhandled error: ${error.message}`, { reqId: req.id, url: req.url, method: req.method });
-      res.status(500).json({ success: false, error: 'Internal server error', details: error.message });
+      // Log error using console as fallback
+      console.error(
+        `Unhandled error: ${error?.message || error}`,
+        { reqId: req.id, url: req.url, method: req.method }
+      );
+      res.status(500).json({ success: false, error: 'Internal server error', details: error?.message });
       next(error);
     });
   };
 };
 
 /**
- * Rate limiter middleware for API key endpoints or any protected routes.
- * Customize as needed or instantiate separately.
+ * Factory for rate limiter middleware to protect routes.
+ *
+ * Customize parameters as needed.
+ *
+ * @returns Express rateLimiter middleware
  */
 export function createApiRateLimiter() {
   return rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
+    max: 100, // max 100 requests per IP per windowMs
     message: { success: false, error: 'Too many requests, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
