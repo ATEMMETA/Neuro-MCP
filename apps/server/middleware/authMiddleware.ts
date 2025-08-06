@@ -1,15 +1,24 @@
 # Authentication for securing endpoints #Security
-// apps/server/src/middleware/authMiddleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { logger } from './requestId.middleware';
 
-const API_KEY = process.env.API_KEY || 'insecure-dev-key';
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) {
+  logger.error('API_KEY environment variable is not set. Exiting.');
+  process.exit(1);
+}
 
 export function authenticate(req: Request, res: Response, next: NextFunction) {
-  const apiKey = req.get('x-api-key');
+  const apiKey = req.header('x-api-key');
 
   if (!apiKey || apiKey !== API_KEY) {
-    logger.warn({ reqId: req.id, url: req.url, method: req.method }, 'Unauthorized access attempt');
+    logger.warn({
+      reqId: (req as any).id,
+      url: req.url,
+      method: req.method,
+      ip: req.ip,
+    }, 'Unauthorized access attempt');
+
     return res.status(401).json({ success: false, error: 'Unauthorized: Invalid API Key' });
   }
 
