@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "MCP Server Overview",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "HTTP Requests Rate",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{handler}}",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 0
+  }
+}
