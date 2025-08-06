@@ -1,23 +1,12 @@
-# Exports all types for easy import #TypeCentralization
-// ... existing types ...
-export interface GithubAgentTask {
-  action: 'listIssues' | 'createIssue';
-  owner: string;
-  repo: string;
-  title?: string;
-  body?: string;
-}
+// apps/server/types/index.ts
 
-export interface GithubAgentResponse {
-  issues?: any[];
-  issue?: any;
-  success?: boolean;
-}
+/**
+ * Exports all types for easy import (#TypeCentralization)
+ */
 
-export type AgentTask = ClaudeAgentTask | TmuxAgentTask | GithubAgentTask;
-export type AgentResponse = ClaudeAgentResponse | TmuxAgentResponse | GithubAgentResponse;
-// ... in main() function ...
-const agentManager = new AgentManager();
-agentManager.registerAgentHandler('claude-agent', claudeAgent);
-agentManager.registerAgentHandler('tmux-agent', tmuxAgent);
-agentManager.registerAgentHandler('github-agent', githubAgent); // <-- New agent!
+export * from './api.types';
+export * from './agent.types';
+
+// Example of exporting agent-specific task/response interfaces individually
+// (optional if you want to be explicit)
+export { GithubAgentTask, GithubAgentResponse } from './agent.types';
