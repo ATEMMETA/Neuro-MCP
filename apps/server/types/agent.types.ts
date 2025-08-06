@@ -1,47 +1,70 @@
-# Types for agent tasks and responses #TypeSafety
-// apps/server/types/agent.types.ts
-
 /**
- * Types for agent tasks and responses (#TypeSafety)
+ * agent.types.ts
+ *
+ * TypeScript types for agent tasks and responses. (#TypeSafety)
  */
 
-// Claude agent example
-export interface ClaudeAgentTask {
-  prompt: string;
-  temperature?: number;
+export interface BaseAgentTask {
+  action: string;
+  priority?: 'low' | 'medium' | 'high';
+  metadata?: Record<string, any>;
+}
+
+export interface ClaudeAgentTask extends BaseAgentTask {
+  data: {
+    prompt: string;
+    temperature?: number;
+  };
+}
+
+export interface TmuxAgentTask extends BaseAgentTask {
+  data: {
+    command: string;
+    sessionName?: string;
+  };
+}
+
+export interface GithubAgentTask extends BaseAgentTask {
+  data: {
+    owner: string;
+    repo: string;
+    title?: string;
+    body?: string;
+  };
 }
 
 export interface ClaudeAgentResponse {
-  text: string;
-  tokensUsed?: number;
-}
-
-// Tmux agent example
-export interface TmuxAgentTask {
-  command: string;
-  sessionName?: string;
+  result: {
+    text: string;
+    tokensUsed?: number;
+  };
 }
 
 export interface TmuxAgentResponse {
-  success: boolean;
-  output?: string;
+  result: {
+    success: boolean;
+    output?: string;
+  };
 }
 
-// GitHub agent example (from your snippet)
-export interface GithubAgentTask {
-  action: 'listIssues' | 'createIssue';
-  owner: string;
-  repo: string;
-  title?: string;
+export interface GithubIssue {
+  id: number;
+  number: number;
+  title: string;
   body?: string;
 }
 
 export interface GithubAgentResponse {
-  issues?: any[];  // You may want to type better here with GitHub Issue schema
-  issue?: any;
-  success?: boolean;
+  result: {
+    issues?: GithubIssue[];
+    issue?: GithubIssue;
+    success?: boolean;
+  };
 }
 
-// Union types representing any agent task/response
 export type AgentTask = ClaudeAgentTask | TmuxAgentTask | GithubAgentTask;
 export type AgentResponse = ClaudeAgentResponse | TmuxAgentResponse | GithubAgentResponse;
+
+export type AgentHandler<T extends AgentTask = AgentTask, R extends AgentResponse = AgentResponse> = (
+  task: T
+) => Promise<R>;
