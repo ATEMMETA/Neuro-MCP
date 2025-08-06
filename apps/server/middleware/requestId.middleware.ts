@@ -16,3 +16,17 @@ export function attachRequestId(req: Request, res: Response, next: NextFunction)
   res.setHeader('X-Request-Id', (req as any).id);
   next();
 }
+import { logger } from '../utils/logger';
+
+export function attachRequestId(req, _res, next) {
+  // Assuming you generate or retrieve a requestId here
+  const requestId = req.headers['x-request-id'] || generateUniqueRequestId();
+
+  // Attach request ID to req for later use
+  req.id = requestId;
+
+  // Log a message with requestId context
+  logger.info({ reqId: requestId }, 'Received new request');
+
+  next();
+}
