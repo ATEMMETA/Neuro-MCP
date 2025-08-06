@@ -1,6 +1,9 @@
 # Centralized error handling #ErrorManagement
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
+import helmet from 'helmet';
+app.use(helmet());
+
 
 /**
  * Centralized Express error handler middleware.
