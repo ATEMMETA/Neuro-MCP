@@ -1,18 +1,24 @@
 /**
  * authMiddleware.ts
- *
- * Middleware for securing Express endpoints with API key authentication,
- * request validation, and error handling. Integrates with AgentManager for
- * agent-related operations.
+ * 
+ * Middleware for securing Express endpoints with API key or JWT authentication,
+ * request body validation, error handling, rate limiting, and OpenTelemetry tracing.
  */
 
-import { Request, Response, NextFunction } from 'express';
-import { AgentManager, AgentConfig, AgentTask, AgentResponse, Logger } from './AgentManager';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
+import jwt from 'jsonwebtoken';
+import { trace } from '@opentelemetry/api';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
-import helmet from 'helmet';
 
-// Extend Express Request interface for type-safe request ID
+// Logger interface consistent with AgentManager/logging expectations
+export interface Logger {
+  info: (meta: any, message: string) => void;
+  warn: (meta: any, message: string) => void;
+  error: (meta: any, message: string) => void;
+}
+
+// Declare extension of Request interface for id property
 declare global {
   namespace Express {
     interface Request {
@@ -21,147 +27,116 @@ declare global {
   }
 }
 
-// Mock validation schema for AgentConfig (replace with actual schema as needed)
-const agentConfigSchema = z.object({
-  id: z.string().min(1, 'Agent ID is required'),
-  name: z.string().min(1, 'Agent name is required'),
-  enabled: z.boolean(),
-  description: z.string().optional(),
-  capabilities: z.array(z.string()).optional(),
-});
+/**
+ * Middleware factory for authentication with API Key or JWT.
+ * 
+ * @param logger - Logger instance for structured logging
+ * @param apiKeys - Set of valid API keys
+ * @param jwtSecret - JWT secret key for token verification
+ */
+export function authenticate(
+  logger: Logger,
+  apiKeys: Set<string>,
+  jwtSecret: string
+): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const tracer = trace.getTracer('my-tmux-project');
+    return tracer.startActiveSpan('authenticate', (span) => {
+      span.setAttribute('http.method', req.method);
+      span.setAttribute('http.url', req.url);
 
-// Validation middleware
-const validateBody = (schema: z.ZodSchema) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      await schema.parseAsync(req.body);
-      next();
-    } catch (error) {
-      logger.error({ reqId: req.id, error }, 'Request body validation failed');
-      res.status(400).json({ success: false, error: 'Invalid request body', details: error.message });
-    }
+      const apiKey = req.header('x-api-key');
+      const authHeader = req.header('authorization');
+
+      // Check API key authentication
+      if (apiKey && apiKeys.has(apiKey)) {
+        logger.info({ reqId: req.id, url: req.url, method: req.method }, 'Authenticated via API key');
+        span.setAttribute('auth.method', 'api-key');
+        span.end();
+        return next();
+      }
+
+      // Check JWT authentication
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+          jwt.verify(token, jwtSecret);
+          logger.info({ reqId: req.id, url: req.url, method: req.method }, 'Authenticated via JWT');
+          span.setAttribute('auth.method', 'jwt');
+          span.end();
+          return next();
+        } catch (error: any) {
+          logger.warn(
+            { reqId: req.id, url: req.url, method: req.method, ip: req.ip, error },
+            'Invalid JWT'
+          );
+          span.recordException(error);
+          span.setStatus({ code: 2, message: error.message });
+          span.end();
+          return res.status(401).json({ success: false, error: 'Unauthorized: Invalid JWT' });
+        }
+      }
+
+      // Unauthorized request if no valid auth given
+      logger.warn(
+        { reqId: req.id, url: req.url, method: req.method, ip: req.ip },
+        'Unauthorized access attempt'
+      );
+      span.setStatus({ code: 2, message: 'Unauthorized' });
+      span.end();
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid API Key or JWT' });
+    });
   };
-};
-
-// Logger interface (consistent with AgentManager)
-interface Logger {
-  info: (metadata: any, message: string) => void;
-  warn: (metadata: any, message: string) => void;
-  error: (metadata: any, message: string) => void;
 }
 
-// Async handler for consistent error handling
-const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Validation middleware generator using Zod schema.
+ * Validates request body asynchronously.
+ * 
+ * @param schema - Zod schema object
+ * @param logger - Logger for error reporting
+ */
+export function validateBody(schema: z.ZodSchema, logger: Logger): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const validatedBody = await schema.parseAsync(req.body);
+      req.body = validatedBody; // Replace with parsed (typed) data
+      next();
+    } catch (error: any) {
+      logger.error({ reqId: req.id, error }, 'Request body validation failed');
+      res.status(400).json({ success: false, error: 'Invalid request body', details: error.errors || error.message });
+    }
+  };
+}
+
+/**
+ * Async handler wrapper to catch errors from async route handlers.
+ * 
+ * @param fn - Async function to wrap
+ */
+export const asyncHandler = (
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
+): RequestHandler => {
+  return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch((error) => {
-      logger.error({ reqId: req.id, error, url: req.url, method: req.method }, 'Request handler error');
+      // Fallback logger or improve by injecting logger instance as needed
+      console.error(`Unhandled error: ${error.message}`, { reqId: req.id, url: req.url, method: req.method });
       res.status(500).json({ success: false, error: 'Internal server error', details: error.message });
       next(error);
     });
   };
 };
 
-// Rate limiter for API key endpoints
-const apiRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
-  message: { success: false, error: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Authentication middleware
-export function authenticate(logger: Logger, apiKeys: Set<string>) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const apiKey = req.header('x-api-key');
-    if (!apiKey || !apiKeys.has(apiKey)) {
-      logger.warn(
-        {
-          reqId: req.id,
-          url: req.url,
-          method: req.method,
-          ip: req.ip,
-        },
-        'Unauthorized access attempt'
-      );
-      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid API Key' });
-    }
-    logger.info({ reqId: req.id, url: req.url, method: req.method }, 'Authenticated request');
-    next();
-  };
+/**
+ * Rate limiter middleware for API key endpoints or any protected routes.
+ * Customize as needed or instantiate separately.
+ */
+export function createApiRateLimiter() {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: { success: false, error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
 }
-
-// Example Express app setup
-import express from 'express';
-
-// Mock logger (replace with actual logger implementation)
-const logger: Logger = {
-  info: (meta, msg) => console.log(`INFO: ${msg}`, meta),
-  warn: (meta, msg) => console.warn(`WARN: ${msg}`, meta),
-  error: (meta, msg) => console.error(`ERROR: ${msg}`, meta),
-};
-
-// Initialize API keys from environment (support multiple keys)
-const API_KEYS = new Set(
-  process.env.API_KEYS?.split(',').map((key) => key.trim()) || []
-);
-if (API_KEYS.size === 0) {
-  logger.error({}, 'No API_KEYS environment variable set. Exiting.');
-  process.exit(1);
-}
-
-// Initialize Express app
-const app = express();
-
-// Apply global security middleware
-app.use(helmet()); // Secure HTTP headers
-app.use(express.json()); // Parse JSON bodies
-app.use((req, res, next) => {
-  req.id = Math.random().toString(36).slice(2); // Mock request ID (replace with proper middleware)
-  next();
-});
-
-// Initialize AgentManager
-const agentManager = AgentManager.getInstance(logger);
-
-// Routes with authentication and rate limiting
-const router = express.Router();
-router.use(apiRateLimiter); // Apply rate limiting to all routes
-router.use(authenticate(logger, API_KEYS)); // Apply authentication
-
-// Create agent endpoint
-router.post(
-  '/create',
-  validateBody(agentConfigSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const config: AgentConfig = req.body;
-    const agentId = await agentManager.createAgent(config);
-    res.json({ success: true, agentId });
-  })
-);
-
-// Run agent endpoint
-router.post(
-  '/agents/:name/run',
-  asyncHandler(async (req: Request, res: Response) => {
-    const result = await agentManager.runAgent(req.params.name, req.body as AgentTask);
-    res.json({ success: true, result });
-  })
-);
-
-// Register routes
-app.use('/api', router);
-
-// Error handling middleware
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
-  logger.error({ reqId: req.id, error, url: req.url, method: req.method }, 'Unhandled error');
-  res.status(500).json({ success: false, error: 'Internal server error' });
-});
-
-// Start server (example)
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  logger.info({}, `Server running on port ${PORT}`);
-});
-
-export { asyncHandler, validateBody, agentConfigSchema };
