@@ -12,7 +12,7 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
-    "commander": "^10.0.0",
+    "commander": "^14.0.0",
     "pino": "^8.0.0"
   },
   "devDependencies": {
