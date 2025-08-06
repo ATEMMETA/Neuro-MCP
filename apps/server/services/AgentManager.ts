@@ -1,16 +1,34 @@
 # Manages agent lifecycle and dispatching
-
 /**
  * AgentManager.ts
  *
  * Manages agent lifecycle: registration, execution, retrieval, creation, and updating.
- * Designed for extensibility and integration with async processing (e.g., agentProcessor).
+ * Supports async handler loading, configuration persistence, and type-safe task handling.
+ * Designed for extensibility and integration with async processing.
  */
 
-import { logger } from '../utils/logger';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
-// Agent handler type (each agent exposes a function receiving task data and returning a Promise)
-type AgentHandler = (task: any) => Promise<any>;
+// Logger interface for dependency injection
+interface Logger {
+  info: (metadata: any, message: string) => void;
+  warn: (metadata: any, message: string) => void;
+  error: (metadata: any, message: string) => void;
+}
+
+// Type definitions for agent tasks, responses, and handlers
+interface AgentTask<T = unknown> {
+  data: T;
+  [key: string]: any;
+}
+
+interface AgentResponse<R = unknown> {
+  result: R;
+  [key: string]: any;
+}
+
+type AgentHandler<T = unknown, R = unknown> = (task: AgentTask<T>) => Promise<AgentResponse<R>>;
 
 interface AgentConfig {
   id: string;
@@ -22,31 +40,88 @@ interface AgentConfig {
 }
 
 class AgentManager {
-  private agentHandlers = new Map<string, AgentHandler>();
+  private agentHandlers = new Map<string, () => Promise<AgentHandler>>();
+  private loadedHandlers = new Map<string, AgentHandler>();
   private agentsConfig = new Map<string, AgentConfig>();
+  private configPath = path.join(__dirname, 'agent-configs.json');
+  private static instance: AgentManager | null = null;
 
-  constructor() {
-    // Could load initial agent configs from disk/config files or DB here
-    // Example:
-    // this.loadAgentConfig('claude-agent', require('../../config/agents/claude-agent.json'));
-    // Or lazy load on demand
+  constructor(private logger: Logger) {
+    this.loadConfigsFromFile().catch(err => {
+      this.logger.error({ err }, 'Failed to load agent configurations');
+    });
   }
 
   /**
-   * Register an agent handler function by agent ID.
-   * @param agentId - Unique agent string ID
-   * @param handler - Function accepting a task, returning Promise with results
+   * Load agent configurations from a JSON file.
+   * @private
    */
-  registerAgentHandler(agentId: string, handler: AgentHandler): void {
-    if (this.agentHandlers.has(agentId)) {
-      logger.warn(`Agent handler for '${agentId}' is being overwritten`);
+  private async loadConfigsFromFile(): Promise<void> {
+    try {
+      const data = await fs.readFile(this.configPath, 'utf-8');
+      const configs = JSON.parse(data) as AgentConfig[];
+      configs.forEach(config => {
+        this.validateConfig(config);
+        this.agentsConfig.set(config.id, config);
+      });
+      this.logger.info({}, 'Loaded agent configurations from file');
+    } catch (error) {
+      this.logger.warn({}, 'No existing agent config file found, starting fresh');
     }
-    this.agentHandlers.set(agentId, handler);
+  }
+
+  /**
+   * Save agent configurations to a JSON file.
+   * @private
+   */
+  private async saveConfigsToFile(): Promise<void> {
+    try {
+      const configs = Array.from(this.agentsConfig.values());
+      await fs.writeFile(this.configPath, JSON.stringify(configs, null, 2));
+      this.logger.info({}, 'Saved agent configurations to file');
+    } catch (error) {
+      this.logger.error({ error }, 'Failed to save agent configurations');
+      throw error;
+    }
+  }
+
+  /**
+   * Validate agent configuration.
+   * @param config - Agent configuration to validate
+   * @throws Error if configuration is invalid
+   */
+  private validateConfig(config: AgentConfig): void {
+    if (!config.id || typeof config.id !== 'string') {
+      throw new Error('Agent config must have a valid string id');
+    }
+    if (!config.name || typeof config.name !== 'string') {
+      throw new Error('Agent config must have a valid string name');
+    }
+    if (typeof config.enabled !== 'boolean') {
+      throw new Error('Agent config must specify enabled as a boolean');
+    }
+  }
+
+  /**
+   * Register an agent handler function by agent ID, supporting async loading.
+   * @param agentId - Unique agent string ID
+   * @param loadHandler - Function that returns a Promise resolving to the agent handler
+   */
+  registerAgentHandler<T, R>(agentId: string, loadHandler: () => Promise<AgentHandler<T, R>>): void {
+    if (!this.agentsConfig.has(agentId)) {
+      this.logger.warn({ agentId }, 'Agent metadata not found during handler registration');
+    }
+    if (this.agentHandlers.has(agentId)) {
+      this.logger.warn({ agentId }, 'Agent handler is being overwritten');
+    }
+    this.agentHandlers.set(agentId, loadHandler);
+    this.loadedHandlers.delete(agentId); // Clear cached handler if overwritten
+    this.logger.info({ agentId }, 'Agent handler registered');
   }
 
   /**
    * List metadata for all registered or configured agents.
-   * Returns array of agent configs.
+   * @returns Array of agent configurations
    */
   listAgents(): AgentConfig[] {
     return Array.from(this.agentsConfig.values());
@@ -54,7 +129,7 @@ class AgentManager {
 
   /**
    * Get detailed agent config by ID.
-   * @param id Agent ID
+   * @param id - Agent ID
    * @returns AgentConfig or undefined if not found
    */
   getAgentById(id: string): AgentConfig | undefined {
@@ -63,29 +138,27 @@ class AgentManager {
 
   /**
    * Create or update an agent configuration and register handler if provided.
-   * @param config Agent configuration object
-   * @param handler Optional agent handler function
+   * @param config - Agent configuration object
+   * @param loadHandler - Optional function to load agent handler asynchronously
    * @returns The agent ID
+   * @throws Error if configuration is invalid
    */
-  async createAgent(config: AgentConfig, handler?: AgentHandler): Promise<string> {
-    if (!config.id) {
-      throw new Error('Agent config must have an id');
-    }
+  async createAgent<T, R>(config: AgentConfig, loadHandler?: () => Promise<AgentHandler<T, R>>): Promise<string> {
+    this.validateConfig(config);
     this.agentsConfig.set(config.id, config);
-    if (handler) {
-      this.registerAgentHandler(config.id, handler);
+    if (loadHandler) {
+      this.registerAgentHandler(config.id, loadHandler);
     }
-    logger.info({ agentId: config.id }, 'Agent configuration saved');
-
-    // TODO: Persist config to DB or file if needed
-
+    await this.saveConfigsToFile();
+    this.logger.info({ agentId: config.id }, 'Agent configuration saved');
     return config.id;
   }
 
   /**
    * Update existing agent configuration.
-   * @param id Agent ID to update
-   * @param update Partial update for agent config
+   * @param id - Agent ID to update
+   * @param update - Partial update for agent config
+   * @throws Error if agent not found or update is invalid
    */
   async updateAgent(id: string, update: Partial<AgentConfig>): Promise<void> {
     const existing = this.agentsConfig.get(id);
@@ -93,85 +166,91 @@ class AgentManager {
       throw new Error(`Agent with id ${id} not found`);
     }
     const updated = { ...existing, ...update };
+    this.validateConfig(updated);
     this.agentsConfig.set(id, updated);
-    logger.info({ agentId: id }, 'Agent configuration updated');
-
-    // TODO: Persist update to DB or file if needed
+    await this.saveConfigsToFile();
+    this.logger.info({ agentId: id }, 'Agent configuration updated');
   }
 
   /**
    * Run an agent by ID with a given task/payload.
-   * Automatically throws if no registered handler.
-   * @param agentId Agent ID
-   * @param task Task payload for the agent handler
-   * @returns Promise resolving to agent's result
+   * @param agentId - Agent ID
+   * @param task - Task payload for the agent handler
+   * @returns Promise resolving to the agent's result
+   * @throws Error if no handler is registered or execution fails
+   * @example
+   * const result = await manager.runAgent('myAgent', { data: { value: 42 } });
    */
-  async runAgent(agentId: string, task: any): Promise<any> {
-    const handler = this.agentHandlers.get(agentId);
+  async runAgent<T, R>(agentId: string, task: AgentTask<T>): Promise<AgentResponse<R>> {
+    let handler = this.loadedHandlers.get(agentId);
     if (!handler) {
-      throw new Error(`No handler registered for agent '${agentId}'`);
+      const loadHandler = this.agentHandlers.get(agentId);
+      if (!loadHandler) {
+        throw new Error(`No handler registered for agent '${agentId}'`);
+      }
+      try {
+        handler = await loadHandler();
+        this.loadedHandlers.set(agentId, handler);
+      } catch (error) {
+        this.logger.error({ agentId, error }, 'Failed to load agent handler');
+        throw new Error(`Failed to load handler for agent '${agentId}': ${error.message}`);
+      }
     }
-
-    logger.info({ agentId, task }, 'Executing agent task');
-    const result = await handler(task);
-    logger.info({ agentId, result }, 'Agent task completed');
-    return result;
+    try {
+      this.logger.info({ agentId, task }, 'Executing agent task');
+      const result = await handler(task);
+      this.logger.info({ agentId, result }, 'Agent task completed');
+      return result;
+    } catch (error) {
+      this.logger.error({ agentId, error }, 'Agent task failed');
+      throw new Error(`Agent '${agentId}' execution failed: ${error.message}`);
+    }
   }
 
   /**
-   * Static convenience for simple use (optional).
-   * Or consider changing class to singleton pattern as needed.
+   * Clear cached handler for an agent.
+   * @param agentId - Agent ID
    */
-  static instance: AgentManager | null = null;
-  static getInstance(): AgentManager {
+  clearHandlerCache(agentId: string): void {
+    this.loadedHandlers.delete(agentId);
+    this.logger.info({ agentId }, 'Cleared cached handler');
+  }
+
+  /**
+   * Singleton instance accessor.
+   * @param logger - Logger instance for dependency injection
+   * @returns Singleton instance of AgentManager
+   */
+  static getInstance(logger: Logger): AgentManager {
     if (!AgentManager.instance) {
-      AgentManager.instance = new AgentManager();
+      AgentManager.instance = new AgentManager(logger);
     }
     return AgentManager.instance;
   }
 
   /**
-   * (Optional) Static shorthand methods:
+   * Static convenience methods for accessing singleton instance
    */
 
-  static async executeAgent(agentId: string, task: any): Promise<any> {
-    return AgentManager.getInstance().runAgent(agentId, task);
+  static async executeAgent<T, R>(logger: Logger, agentId: string, task: AgentTask<T>): Promise<AgentResponse<R>> {
+    return AgentManager.getInstance(logger).runAgent(agentId, task);
   }
 
-  static async createAgentStatic(config: AgentConfig, handler?: AgentHandler): Promise<string> {
-    return AgentManager.getInstance().createAgent(config, handler);
+  static async createAgentStatic<T, R>(
+    logger: Logger,
+    config: AgentConfig,
+    loadHandler?: () => Promise<AgentHandler<T, R>>
+  ): Promise<string> {
+    return AgentManager.getInstance(logger).createAgent(config, loadHandler);
   }
 
-  static getAgentsList(): AgentConfig[] {
-    return AgentManager.getInstance().listAgents();
+  static getAgentsList(logger: Logger): AgentConfig[] {
+    return AgentManager.getInstance(logger).listAgents();
   }
 
-  static getAgentConfigById(id: string): AgentConfig | undefined {
-    return AgentManager.getInstance().getAgentById(id);
-  }
-}
-
-export { AgentManager, AgentConfig, AgentHandler };
-
-
-import { AgentMetadata, AgentHandler } from '../types';
-
-export class AgentManager {
-  private handlers = new Map<string, () => Promise<AgentHandler>>();
-
-  registerAgentHandler(name: string, loadHandler: () => Promise<AgentHandler>) {
-    if (!this.agents.has(name)) {
-      throw new Error(`Agent '${name}' metadata not found`);
-    }
-    this.handlers.set(name, loadHandler);
-  }
-
-  async runAgent(name: string, task: AgentTask): Promise<AgentResponse> {
-    const loadHandler = this.handlers.get(name);
-    if (!loadHandler) {
-      throw new Error(`No handler registered for agent '${name}'`);
-    }
-    const handler = await loadHandler();
-    return await handler(task);
+  static getAgentConfigById(logger: Logger, id: string): AgentConfig | undefined {
+    return AgentManager.getInstance(logger).getAgentById(id);
   }
 }
+
+export { AgentManager, AgentConfig, AgentHandler, AgentTask, AgentResponse, Logger };
