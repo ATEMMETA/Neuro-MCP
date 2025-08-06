@@ -3,6 +3,12 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from './requestId.middleware';
 import helmet from 'helmet';
 app.use(helmet());
+import { validateBody } from './middleware/validationMiddleware';
+import { agentConfigSchema } from './validation/agentSchema';
+
+router.post('/create', validateBody(agentConfigSchema), async (req, res) => {
+  // validated at this point
+});
 
 
 const API_KEY = process.env.API_KEY;
