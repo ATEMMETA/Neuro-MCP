@@ -1,42 +1,45 @@
-# Centralized error handling #ErrorManagement
-import { Request, Response, NextFunction } from 'express';
-import { logger } from '../utils/logger';
-import helmet from 'helmet';
-app.use(helmet());
-import { validateBody } from './middleware/validationMiddleware';
-import { agentConfigSchema } from './validation/agentSchema';
-
-router.post('/create', validateBody(agentConfigSchema), async (req, res) => {
-  // validated at this point
-});
-const asyncHandler = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
-
-// Usage:
-app.post('/agents/:name/run', asyncHandler(async (req, res) => {
-  const result = await agentManager.runAgent(req.params.name, req.body);
-  res.json({ success: true, result });
-}));
-
-
-
 /**
+ * errorHandler.ts
+ *
  * Centralized Express error handler middleware.
- * Logs error and sends standardized JSON response.
+ * Logs errors with request context and sends standardized JSON responses.
+ * Categorizes errors for appropriate status codes and messages.
  */
-export default function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
-  const reqId = (req as any).id || 'unknown';
 
-  // Log error with context
-  logger.error({ reqId, err, stack: err.stack }, 'Unhandled error occurred');
+import { Request, Response, NextFunction } from 'express';
+import { Logger } from './AgentManager';
 
-  // Customize response (could check for validation or known error types)
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+interface AppError extends Error {
+  statusCode?: number;
+  isValidationError?: boolean;
+}
 
-  res.status(statusCode).json({
-    success: false,
-    error: message,
-    reqId,
-  });
+export function errorHandler(logger: Logger) {
+  return (err: AppError, req: Request, res: Response, next: NextFunction) => {
+    const reqId = req.id || 'unknown';
+
+    // Log error with context
+    const logMetadata = {
+      reqId,
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+      method: req.method,
+      url: req.url,
+    };
+    logger.error(logMetadata, 'Unhandled error occurred');
+
+    // Determine status code and message
+    const statusCode = err.statusCode || (err.isValidationError ? 400 : 500);
+    const message = err.isValidationError
+      ? 'Validation error'
+      : err.message || 'Internal Server Error';
+
+    // Send standardized response
+    res.status(statusCode).json({
+      success: false,
+      error: message,
+      reqId,
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    });
+  };
 }
