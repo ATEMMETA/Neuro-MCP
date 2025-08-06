@@ -2,7 +2,7 @@
  * app.ts
  *
  * Main Express application setup, integrating AgentManager, authentication,
- * request ID, and validation middleware.
+ * request ID, validation, error handling, and middleware composition.
  */
 
 import express, { Request, Response, NextFunction } from 'express';
@@ -13,6 +13,8 @@ import { AgentManager, AgentConfig, AgentTask, AgentResponse, Logger } from './A
 import { authenticate } from './authMiddleware';
 import { validateBody } from './validationMiddleware';
 import { attachRequestId } from './requestId.middleware';
+import { errorHandler } from './errorHandler';
+import { compose } from './compose';
 
 // Extend Express Request interface for type-safe request ID
 declare global {
@@ -47,8 +49,7 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
         { reqId: req.id, error, url: req.url, method: req.method },
         'Request handler error'
       );
-      res.status(500).json({ success: false, error: 'Internal server error', details: error.message });
-      next(error);
+      next(error); // Delegate to errorHandler
     });
   };
 };
@@ -84,8 +85,17 @@ const agentManager = AgentManager.getInstance(logger);
 
 // Routes
 const router = express.Router();
-router.use(apiRateLimiter); // Apply rate limiting
-router.use(authenticate(logger, API_KEYS)); // Apply authentication
+
+// Compose middleware for API routes
+router.use(
+  compose(
+    [
+      apiRateLimiter, // Rate limiting
+      authenticate(logger, API_KEYS), // Authentication
+    ],
+    logger
+  )
+);
 
 // Create agent endpoint
 router.post(
@@ -101,6 +111,7 @@ router.post(
 // Run agent endpoint
 router.post(
   '/agents/:name/run',
+  validateBody(z.object({ data: z.any() }), logger), // Basic validation for AgentTask
   asyncHandler(async (req: Request, res: Response) => {
     const result = await agentManager.runAgent(req.params.name, req.body as AgentTask);
     res.json({ success: true, result });
@@ -111,13 +122,7 @@ router.post(
 app.use('/api', router);
 
 // Global error handling
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
-  logger.error(
-    { reqId: req.id, error, url: req.url, method: req.method },
-    'Unhandled error'
-  );
-  res.status(500).json({ success: false, error: 'Internal server error' });
-});
+app.use(errorHandler(logger));
 
 // Start server
 const PORT = process.env.PORT || 3000;
