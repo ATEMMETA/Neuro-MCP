@@ -1,1 +1,18 @@
-# Metadata for Claude AI agent #AgentConfig
+{
+  "id": "claude-agent",
+  "name": "Claude Agent",
+  "description": "Agent integration for Claude AI, providing advanced natural language understanding and generation",
+  "version": "1.2.3",
+  "capabilities": [
+    "text-generation",
+    "question-answering",
+    "document-summarization"
+  ],
+  "enabled": true,
+  "metadata": {
+    "author": "Your Name or Team",
+    "createdAt": "2024-02-15T00:00:00Z",
+    "updatedAt": "2025-02-10T00:00:00Z",
+    "documentationUrl": "https://docs.yourproject.com/agents/claude-agent"
+  }
+}
