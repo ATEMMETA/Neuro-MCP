@@ -1,0 +1,75 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "mcp-overview",
+    "title": "MCP Server Overview",
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 0,
+    "refresh": "30s",
+    "panels": [
+      {
+        "title": "HTTP Requests Rate (5m avg)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{handler}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "format": "req/s", "label": "Requests per second", "logBase": 1, "min": 0 },
+          { "format": "short", "show": false }
+        ],
+        "xaxis": { "mode": "time" }
+      },
+      {
+        "title": "Error Rate (5m avg)",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{status=~\"5..\"}[5m])",
+            "legendFormat": "5xx errors",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          { "format": "req/s", "label": "Errors per second", "logBase": 1, "min": 0 },
+          { "format": "short", "show": false }
+        ],
+        "xaxis": { "mode": "time" }
+      },
+      {
+        "title": "Memory Usage",
+        "type": "gauge",
+        "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes",
+            "refId": "C"
+          }
+        ],
+        "maxValue": null,
+        "minValue": 0,
+        "format": "bytes"
+      },
+      {
+        "title": "CPU Usage",
+        "type": "gauge",
+        "gridPos": { "x": 6, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "rate(process_cpu_seconds_total[1m]) * 100",
+            "refId": "D"
+          }
+        ],
+        "maxValue": 100,
+        "minValue": 0,
+        "format": "percent"
+      }
+    ]
+  }
+}
