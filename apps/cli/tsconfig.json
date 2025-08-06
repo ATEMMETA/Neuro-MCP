@@ -1,1 +1,16 @@
-# CLI TypeScript config #StaticTyping
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*", "mcp-cli.ts"],
+  "exclude": ["node_modules"]
+}
